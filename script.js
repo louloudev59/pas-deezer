@@ -617,12 +617,25 @@ class MusicPlayer {
                             console.log('Erreur de lecture:', error);
                         });
                     }
+        this.audio.addEventListener('play', () => {
+            try {
+                let trackId = null;
+                if (this.playlist && this.playlist[this.currentTrackIndex]) {
+                    trackId = this.playlist[this.currentTrackIndex].id;
                 }
-            }
+                // fallback: try to resolve by matching audio.src with track.audioFile
+                if (!trackId && this.audio.src && this.playlist) {
+                    const src = this.audio.src || '';
+                    const found = this.playlist.find(t => (t.audioFile && src.indexOf(t.audioFile) !== -1));
+                    if (found) trackId = found.id;
+                }
+                if (trackId) {
+                    this.recordPlayStart(trackId);
+                } else {
+                    console.log('recordPlayStart: no track id resolved on play, src=', this.audio.src);
+                }
+            } catch (e) {}
         });
-    
-        this.favoriteBtn.addEventListener('click', () => this.handleReviewSystem());
-    
         this.settingsBtn.addEventListener('click', () => this.toggleVolumePopup());
     
         const volumeUp = this.volumePopup.querySelector('.volume-btn.up');
@@ -1369,7 +1382,7 @@ class MusicPlayer {
                     browser = navigator.userAgentData.brands.map(b=>b.brand+' '+b.version).join(', ');
                 }
             }catch(e){}
-            const platform = /iPhone|iPad|iPod/.test(ua)? 'iOS' : (/Android/.test(ua)? 'Android' : (/Macintosh/.test(ua)? 'Mac' : (/Windows/.test(ua)? 'Windows' : 'Other')));
+            const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || (/Android/.test(ua) ? 'Android' : (/iPhone|iPad|iPod/.test(ua) ? 'iOS' : (/Macintosh|Mac OS X/.test(ua) ? 'Mac' : (/Windows/.test(ua) ? 'Windows' : 'Other'))));
             this.analytics.devices = this.analytics.devices || {};
             this.analytics.devices[this.deviceId] = Object.assign(this.analytics.devices[this.deviceId] || {}, {lastSeen: new Date().toISOString(), ua: ua, browser: browser, platform: platform});
             this.saveAnalytics();
@@ -1393,6 +1406,19 @@ class MusicPlayer {
         return 'dev_' + Math.random().toString(36).slice(2, 10);
     }
 
+    detectPlatform() {
+        try{
+            const ua = navigator.userAgent || '';
+            if (navigator.userAgentData && navigator.userAgentData.platform) return navigator.userAgentData.platform;
+            if (navigator.platform) return navigator.platform;
+            if (/Android/.test(ua)) return 'Android';
+            if (/iPhone|iPad|iPod/.test(ua)) return 'iOS';
+            if (/Macintosh|Mac OS X/.test(ua)) return 'Mac';
+            if (/Windows/.test(ua)) return 'Windows';
+            return 'Other';
+        }catch(e){ return 'Unknown'; }
+    }
+
     recordPlayStart(trackId){
         try{
             if(!trackId) return;
@@ -1403,10 +1429,11 @@ class MusicPlayer {
             a.devices[this.deviceId] = a.devices[this.deviceId] || {count:0,totalTimeSeconds:0};
             a.devices[this.deviceId].count = (a.devices[this.deviceId].count||0) + 1;
             this.analytics.devices = this.analytics.devices || {};
-            this.analytics.devices[this.deviceId] = this.analytics.devices[this.deviceId] || {lastSeen: new Date().toISOString()};
+            const platform = this.detectPlatform();
+            this.analytics.devices[this.deviceId] = Object.assign(this.analytics.devices[this.deviceId] || {}, {lastSeen: new Date().toISOString(), platform: platform, ua: navigator.userAgent||''});
             this.saveAnalytics();
             // try to send to serverless endpoint (only when enabled)
-            const payload = {type:'play_start',trackId,deviceId:this.deviceId,ts:new Date().toISOString(), ua: navigator.userAgent||''};
+            const payload = {type:'play_start',trackId,deviceId:this.deviceId,ts:new Date().toISOString(), ua: navigator.userAgent||'', platform: platform};
             if(this.serverCollectEnabled){
                 try{ fetch('/api/collect', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{}); }catch(e){}
             } else {

@@ -617,24 +617,8 @@ class MusicPlayer {
                             console.log('Erreur de lecture:', error);
                         });
                     }
-        this.audio.addEventListener('play', () => {
-            try {
-                let trackId = null;
-                if (this.playlist && this.playlist[this.currentTrackIndex]) {
-                    trackId = this.playlist[this.currentTrackIndex].id;
                 }
-                // fallback: try to resolve by matching audio.src with track.audioFile
-                if (!trackId && this.audio.src && this.playlist) {
-                    const src = this.audio.src || '';
-                    const found = this.playlist.find(t => (t.audioFile && src.indexOf(t.audioFile) !== -1));
-                    if (found) trackId = found.id;
-                }
-                if (trackId) {
-                    this.recordPlayStart(trackId);
-                } else {
-                    console.log('recordPlayStart: no track id resolved on play, src=', this.audio.src);
-                }
-            } catch (e) {}
+            }
         });
         this.settingsBtn.addEventListener('click', () => this.toggleVolumePopup());
     

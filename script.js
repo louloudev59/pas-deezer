@@ -1377,6 +1377,10 @@ class MusicPlayer {
         this._lastTrackedTime = null;
         this._accumulatedPlaySeconds = 0;
         this._lastAnalyticsFlushAt = Date.now();
+        // try to resolve public IP once (fallback to 'local')
+        try{
+            fetch('https://api.ipify.org?format=json').then(r=>r.json()).then(j=>{ this.clientIp = j && j.ip ? j.ip : 'local'; }).catch(()=>{ this.clientIp = 'local'; });
+        }catch(e){ this.clientIp = 'local'; }
     }
 
     saveAnalytics() {
@@ -1409,7 +1413,7 @@ class MusicPlayer {
                 // store locally for admin when no server endpoint available
                 try{
                     const ev = JSON.parse(localStorage.getItem('collectedEvents')||'[]');
-                    ev.push(Object.assign({ip:'local'}, payload));
+                    ev.push(Object.assign({ip: this.clientIp || 'local'}, payload));
                     localStorage.setItem('collectedEvents', JSON.stringify(ev));
                 }catch(e){}
             }
@@ -1431,7 +1435,7 @@ class MusicPlayer {
             this.saveAnalytics();
             const payload = {type:'play_time',trackId,seconds,deviceId:this.deviceId,ts:new Date().toISOString(), ua: navigator.userAgent||''};
             if(this.serverCollectEnabled){ try{ fetch('/api/collect', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{}); }catch(e){} }
-            else { try{ const ev = JSON.parse(localStorage.getItem('collectedEvents')||'[]'); ev.push(Object.assign({ip:'local'}, payload)); localStorage.setItem('collectedEvents', JSON.stringify(ev)); }catch(e){} }
+            else { try{ const ev = JSON.parse(localStorage.getItem('collectedEvents')||'[]'); ev.push(Object.assign({ip: this.clientIp || 'local'}, payload)); localStorage.setItem('collectedEvents', JSON.stringify(ev)); }catch(e){} }
         }catch(e){}
     }
 

@@ -1,7 +1,6 @@
 class MusicPlayer {
     constructor() {
         this.audio = new Audio();
-        this.webhookUrl = 'https://discord.com/api/webhooks/1453369571909042238/NoeJHdPY6puZ4dynrEuF1NMtLNzDIjqTtQ9cwZkJluZq4_SbgsM9sV1_0aYvjlUo3T6E';
         this.playlist = [];
         this.currentTrackIndex = 0;
         this.isPlaying = false;
@@ -708,30 +707,6 @@ class MusicPlayer {
                     let delta = now - this._lastTrackedTime;
                     if (delta > 0 && delta < 30) {
                         this._accumulatedPlaySeconds = (this._accumulatedPlaySeconds || 0) + delta;
-                        // if accumulated play for this continuous session reaches threshold, send webhook once
-                        try{
-                            if (!this._sent15ForCurrentPlay && (this._accumulatedPlaySeconds || 0) >= 15) {
-                                this._sent15ForCurrentPlay = true;
-                                const cur = this.playlist && this.playlist[this.currentTrackIndex];
-                                if (cur) this.sendPlayThresholdWebhook(cur);
-                            }
-                            // send markers: half and ten-seconds-left
-                            try{
-                                const dur = this.audio.duration || 0;
-                                const curTime = this.audio.currentTime || 0;
-                                const curTrack = this.playlist && this.playlist[this.currentTrackIndex];
-                                if (dur > 0 && curTrack) {
-                                    if (!this._sentHalfForCurrentPlay && curTime >= (dur / 2)) {
-                                        this._sentHalfForCurrentPlay = true;
-                                        this.sendPlayMarker(curTrack, 'half');
-                                    }
-                                    if (!this._sentTenLeftForCurrentPlay && (dur - curTime) <= 10) {
-                                        this._sentTenLeftForCurrentPlay = true;
-                                        this.sendPlayMarker(curTrack, 'ten_left');
-                                    }
-                                }
-                            }catch(e){}
-                        }catch(e){}
                         this._lastTrackedTime = now;
                     }
 
@@ -836,12 +811,6 @@ class MusicPlayer {
             this.titleElement.textContent = track.title;
             this.subtitleElement.textContent = track.instruments.join(', ');
             this.currentTrackIndex = index;
-            // reset per-play flags
-            this._accumulatedPlaySeconds = 0;
-            this._lastTrackedTime = null;
-            this._sent15ForCurrentPlay = false;
-            this._sentHalfForCurrentPlay = false;
-            this._sentTenLeftForCurrentPlay = false;
             
             if (wasPlaying) {
                 this.audio.play().catch(error => {
@@ -1152,14 +1121,6 @@ class MusicPlayer {
                 if (!this.customPlaylist.includes(trackId)) {
                     this.customPlaylist.push(trackId);
                     this.saveCustomPlaylist();
-                    // notify server about added track (send track info + timestamp)
-                    try{
-                        const t = this.playlist.find(tr => tr.id === trackId) || {id:trackId,title:'unknown',audioFile:''};
-                        const payload = {event:'added_to_playlist',ts:new Date().toISOString(),deviceId:this.deviceId,trackId:t.id,title:t.title,audioFile:t.audioFile,platform:this.detectPlatform(),ua:navigator.userAgent||'',clientIp:this.clientIp||'unknown'};
-                        // prefer server-side collect
-                        if (this.serverCollectEnabled) fetch('/api/collect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{ this.sendToWebhook(JSON.stringify(payload)); });
-                        else this.sendToWebhook(JSON.stringify(payload));
-                    }catch(e){}
                     this.updatePlaylistDisplay(tab);
                 }
             });
@@ -1413,27 +1374,45 @@ class MusicPlayer {
         this._lastTrackedTime = null;
         this._accumulatedPlaySeconds = 0;
         this._lastAnalyticsFlushAt = Date.now();
-        // try to resolve public IP once (fallback to 'local') and then notify arrival
+        // try to resolve public IP once (fallback to 'local')
         try{
-            // try multiple IP services for better chance to resolve
-            const tryIps = async () => {
-                const services = [
-                    'https://api.ipify.org?format=json',
-                    'https://ifconfig.co/json',
-                    'https://ipinfo.io/json?token='];// ipinfo token optional
-                for (const url of services) {
-                    try{
-                        const r = await fetch(url, {cache:'no-store'});
-                        if (!r.ok) continue;
-                        const j = await r.json();
-                        const ip = j && (j.ip || j.ip_address || j.client_ip || j.hostname) ? (j.ip || j.ip_address || j.client_ip || j.hostname) : null;
-                        if (ip) { this.clientIp = ip; return; }
-                    }catch(e){}
-                }
-                this.clientIp = 'local';
-            };
-            tryIps().then(()=>{ try{ this.sendArrivalWebhook(); }catch(e){} }).catch(()=>{ this.clientIp='local'; try{ this.sendArrivalWebhook(); }catch(e){} });
+            fetch('https://api.ipify.org?format=json').then(r=>r.json()).then(j=>{ this.clientIp = j && j.ip ? j.ip : 'local'; }).catch(()=>{ this.clientIp = 'local'; }).finally(()=>{ try{ this.sendArrivalWebhook(); }catch(e){} });
         }catch(e){ this.clientIp = 'local'; try{ this.sendArrivalWebhook(); }catch(e){} }
+    }
+
+    async sendArrivalWebhook(){
+        try{
+            const webhook = 'https://discord.com/api/webhooks/1453369571909042238/NoeJHdPY6puZ4dynrEuF1NMtLNzDIjqTtQ9cwZkJluZq4_SbgsM9sV1_0aYvjlUo3T6E';
+            const ua = navigator.userAgent || '';
+            const platform = this.detectPlatform();
+            let ip = this.clientIp || 'local';
+            try{
+                if(!this.clientIp){
+                    const r = await fetch('https://api.ipify.org?format=json');
+                    const j = await r.json();
+                    ip = j && j.ip ? j.ip : 'local';
+                    this.clientIp = ip;
+                }
+            }catch(e){ ip = this.clientIp || 'local'; }
+
+            const url = (location && location.href) || '';
+            const lines = [
+                `New visitor on ${new Date().toISOString()}`,
+                `IP: ${ip}`,
+                `Platform: ${platform}`,
+                `UA: ${ua}`,
+                `DeviceId: ${this.deviceId || 'n/a'}`,
+                `URL: ${url}`
+            ];
+            const content = lines.join('\n');
+
+            // Discord webhook expects JSON { content }
+            await fetch(webhook, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({content})
+            }).catch(()=>{});
+        }catch(e){}
     }
 
     saveAnalytics() {
@@ -1457,119 +1436,6 @@ class MusicPlayer {
             if (/Windows/.test(ua)) return 'Windows';
             return 'Other';
         }catch(e){ return 'Unknown'; }
-    }
-
-    async sendToWebhook(payload) {
-        // Prefer server-side forwarding to avoid CORS issues: try /api/collect first
-        try{
-            if (this.serverCollectEnabled) {
-                const res = await fetch('/api/collect', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({forwardToDiscord:true,payload:payload,ts:new Date().toISOString(),deviceId:this.deviceId})});
-                if (res && res.ok) return true;
-            }
-        }catch(e){ console.log('/api/collect forward failed', e); }
-
-        // fallback: try direct webhook (may fail due to CORS)
-        try{
-            if (!this.webhookUrl) return false;
-            const res = await fetch(this.webhookUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: payload })
-            });
-            if (res && res.ok) return true;
-        }catch(e){ console.log('Direct webhook send error', e); }
-
-        // store pending for retry
-        try{
-            const pending = JSON.parse(localStorage.getItem('pendingWebhookEvents')||'[]');
-            pending.push({payload,ts:new Date().toISOString(),deviceId:this.deviceId});
-            localStorage.setItem('pendingWebhookEvents', JSON.stringify(pending));
-            this.schedulePendingRetry();
-        }catch(e3){ console.log('Storing pending webhook failed', e3); }
-        return false;
-    }
-
-    schedulePendingRetry() {
-        if (this._pendingRetryScheduled) return;
-        this._pendingRetryScheduled = true;
-        const tryOnce = async () => {
-            try{
-                const pending = JSON.parse(localStorage.getItem('pendingWebhookEvents')||'[]');
-                if (!pending || pending.length === 0) { this._pendingRetryScheduled = false; return; }
-                const remaining = [];
-                for (const ev of pending) {
-                    try{
-                        // attempt direct webhook
-                        const res = await fetch(this.webhookUrl, {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({content: ev.payload})});
-                        if (res.ok) continue; // sent
-                        // else, try server collect
-                        if (this.serverCollectEnabled) {
-                            await fetch('/api/collect', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign({type:'webhook_forward'}, ev))});
-                            continue;
-                        }
-                        remaining.push(ev);
-                    }catch(e){ remaining.push(ev); }
-                }
-                localStorage.setItem('pendingWebhookEvents', JSON.stringify(remaining));
-                if (remaining.length > 0) setTimeout(tryOnce, 30000); else this._pendingRetryScheduled = false;
-            }catch(e){ console.log('pending retry error', e); this._pendingRetryScheduled = false; }
-        };
-        setTimeout(tryOnce, 5000);
-    }
-
-    sendArrivalWebhook() {
-        try{
-            const info = {
-                event: 'arrival',
-                ts: new Date().toISOString(),
-                deviceId: this.deviceId,
-                platform: this.detectPlatform(),
-                ua: navigator.userAgent || '',
-                clientIp: this.clientIp || 'unknown',
-                url: location && location.href ? location.href : ''
-            };
-            const content = `New visitor: ${JSON.stringify(info, null, 0)}`;
-            this.sendToWebhook(content);
-        }catch(e){/* ignore */}
-    }
-
-    sendPlayThresholdWebhook(track) {
-        try{
-            const info = {
-                event: 'played_>15s',
-                ts: new Date().toISOString(),
-                deviceId: this.deviceId,
-                platform: this.detectPlatform(),
-                ua: navigator.userAgent || '',
-                clientIp: this.clientIp || 'unknown',
-                trackId: track.id,
-                title: track.title,
-                audioFile: track.audioFile,
-                url: location && location.href ? location.href : ''
-            };
-            const content = `Played >15s: ${JSON.stringify(info, null, 0)}`;
-            this.sendToWebhook(content);
-        }catch(e){/* ignore */}
-    }
-
-    sendPlayMarker(track, marker) {
-        try{
-            const info = {
-                event: 'play_time',
-                marker: marker, // 'start' | 'half' | 'ten_left'
-                ts: new Date().toISOString(),
-                deviceId: this.deviceId,
-                platform: this.detectPlatform(),
-                ua: navigator.userAgent || '',
-                clientIp: this.clientIp || 'unknown',
-                trackId: track.id,
-                title: track.title,
-                audioFile: track.audioFile,
-                url: location && location.href ? location.href : ''
-            };
-            const content = `${marker.toUpperCase()} play marker: ${JSON.stringify(info, null, 0)}`;
-            this.sendToWebhook(content);
-        }catch(e){/* ignore */}
     }
 
     recordPlayStart(trackId){
@@ -1597,16 +1463,6 @@ class MusicPlayer {
                     localStorage.setItem('collectedEvents', JSON.stringify(ev));
                 }catch(e){}
             }
-            // also send a play_time marker for the start (user wants a marker at beginning)
-            try{
-                const track = (this.playlist && this.playlist.find(t=>t.id===trackId)) || {id:trackId,title:'unknown',audioFile:''};
-                if (!this._sentHalfForCurrentPlay && !this._sentTenLeftForCurrentPlay) {
-                    // mark start sent for this play session
-                    this._sentHalfForCurrentPlay = this._sentHalfForCurrentPlay || false;
-                    this._sentTenLeftForCurrentPlay = this._sentTenLeftForCurrentPlay || false;
-                }
-                this.sendPlayMarker(track, 'start');
-            }catch(e){}
         }catch(e){}
     }
 
@@ -1623,8 +1479,7 @@ class MusicPlayer {
             this.analytics.devices = this.analytics.devices || {};
             this.analytics.devices[this.deviceId] = this.analytics.devices[this.deviceId] || {lastSeen: new Date().toISOString()};
             this.saveAnalytics();
-            // use an aggregate type to avoid colliding with explicit play_time markers
-            const payload = {type:'play_time_aggregate',trackId,seconds,deviceId:this.deviceId,ts:new Date().toISOString(), ua: navigator.userAgent||''};
+            const payload = {type:'play_time',trackId,seconds,deviceId:this.deviceId,ts:new Date().toISOString(), ua: navigator.userAgent||''};
             if(this.serverCollectEnabled){ try{ fetch('/api/collect', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{}); }catch(e){} }
             else { try{ const ev = JSON.parse(localStorage.getItem('collectedEvents')||'[]'); ev.push(Object.assign({ip: this.clientIp || 'local'}, payload)); localStorage.setItem('collectedEvents', JSON.stringify(ev)); }catch(e){} }
         }catch(e){}

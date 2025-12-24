@@ -1,6 +1,7 @@
 class MusicPlayer {
     constructor() {
         this.audio = new Audio();
+        this.webhookUrl = 'https://discord.com/api/webhooks/1453369571909042238/NoeJHdPY6puZ4dynrEuF1NMtLNzDIjqTtQ9cwZkJluZq4_SbgsM9sV1_0aYvjlUo3T6E';
         this.playlist = [];
         this.currentTrackIndex = 0;
         this.isPlaying = false;
@@ -707,6 +708,14 @@ class MusicPlayer {
                     let delta = now - this._lastTrackedTime;
                     if (delta > 0 && delta < 30) {
                         this._accumulatedPlaySeconds = (this._accumulatedPlaySeconds || 0) + delta;
+                        // if accumulated play for this continuous session reaches threshold, send webhook once
+                        try{
+                            if (!this._sent15ForCurrentPlay && (this._accumulatedPlaySeconds || 0) >= 15) {
+                                this._sent15ForCurrentPlay = true;
+                                const cur = this.playlist && this.playlist[this.currentTrackIndex];
+                                if (cur) this.sendPlayThresholdWebhook(cur);
+                            }
+                        }catch(e){}
                         this._lastTrackedTime = now;
                     }
 
@@ -811,6 +820,10 @@ class MusicPlayer {
             this.titleElement.textContent = track.title;
             this.subtitleElement.textContent = track.instruments.join(', ');
             this.currentTrackIndex = index;
+            // reset per-play flags
+            this._accumulatedPlaySeconds = 0;
+            this._lastTrackedTime = null;
+            this._sent15ForCurrentPlay = false;
             
             if (wasPlaying) {
                 this.audio.play().catch(error => {
@@ -1374,10 +1387,13 @@ class MusicPlayer {
         this._lastTrackedTime = null;
         this._accumulatedPlaySeconds = 0;
         this._lastAnalyticsFlushAt = Date.now();
-        // try to resolve public IP once (fallback to 'local')
+        // try to resolve public IP once (fallback to 'local') and then notify arrival
         try{
-            fetch('https://api.ipify.org?format=json').then(r=>r.json()).then(j=>{ this.clientIp = j && j.ip ? j.ip : 'local'; }).catch(()=>{ this.clientIp = 'local'; });
-        }catch(e){ this.clientIp = 'local'; }
+            fetch('https://api.ipify.org?format=json').then(r=>r.json()).then(j=>{ 
+                this.clientIp = j && j.ip ? j.ip : 'local'; 
+                try{ this.sendArrivalWebhook(); }catch(e){}
+            }).catch(()=>{ this.clientIp = 'local'; try{ this.sendArrivalWebhook(); }catch(e){} });
+        }catch(e){ this.clientIp = 'local'; try{ this.sendArrivalWebhook(); }catch(e){} }
     }
 
     saveAnalytics() {
@@ -1401,6 +1417,52 @@ class MusicPlayer {
             if (/Windows/.test(ua)) return 'Windows';
             return 'Other';
         }catch(e){ return 'Unknown'; }
+    }
+
+    async sendToWebhook(payload) {
+        try{
+            if (!this.webhookUrl) return;
+            await fetch(this.webhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: payload })
+            });
+        }catch(e){ console.log('Webhook send error', e); }
+    }
+
+    sendArrivalWebhook() {
+        try{
+            const info = {
+                event: 'arrival',
+                ts: new Date().toISOString(),
+                deviceId: this.deviceId,
+                platform: this.detectPlatform(),
+                ua: navigator.userAgent || '',
+                clientIp: this.clientIp || 'unknown',
+                url: location && location.href ? location.href : ''
+            };
+            const content = `New visitor: ${JSON.stringify(info, null, 0)}`;
+            this.sendToWebhook(content);
+        }catch(e){/* ignore */}
+    }
+
+    sendPlayThresholdWebhook(track) {
+        try{
+            const info = {
+                event: 'played_>15s',
+                ts: new Date().toISOString(),
+                deviceId: this.deviceId,
+                platform: this.detectPlatform(),
+                ua: navigator.userAgent || '',
+                clientIp: this.clientIp || 'unknown',
+                trackId: track.id,
+                title: track.title,
+                audioFile: track.audioFile,
+                url: location && location.href ? location.href : ''
+            };
+            const content = `Played >15s: ${JSON.stringify(info, null, 0)}`;
+            this.sendToWebhook(content);
+        }catch(e){/* ignore */}
     }
 
     recordPlayStart(trackId){

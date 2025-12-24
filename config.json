@@ -21,7 +21,7 @@
     { "id": "track19", "title": "Moins dur de moi", "audioFile": "sons/demoimoinsdurmaisdur.mp3", "instruments": ["Guitar"] },
     { "id": "track20", "title": "Shamballa - Anyme023", "audioFile": "sons/shamballa.mp3", "instruments": ["Ukulele"] },
     { "id": "track21", "title": "Perfect - Ed Shreeran", "audioFile": "sons/Perfect - Ed sheeran.mp3", "instruments": ["Guitar"] },
-    { "id": "track22", "title": "I'm Blue", "audioFile":"imblue.mp3", "instruments": ["Guitar"] },
+    { "id": "track22", "title": "I'm Blue", "audioFile":"sons/imblue.mp3", "instruments": ["Guitar"] },
     { "id": "track23", "title": "Est-ce que tu m'aimes - Gims - Guitar batterie", "audioFile":"sons/gimsestcequetumaime.mp3", "instruments": ["Guitar", "Batterie"] },
     { "id": "track24", "title": "Ninao - Gims - Guitar batterie", "audioFile":"sons/gimsninao.mp3", "instruments": ["Guitar", "Batterie"] },
     {"id": "track25", "title": "I'm Yours - Guitar", "audioFile":"sons/imyours.mp3", "instruments": ["Guitar"] },

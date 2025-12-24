@@ -1422,12 +1422,61 @@ class MusicPlayer {
     async sendToWebhook(payload) {
         try{
             if (!this.webhookUrl) return;
-            await fetch(this.webhookUrl, {
+            // try direct webhook
+            const res = await fetch(this.webhookUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content: payload })
             });
-        }catch(e){ console.log('Webhook send error', e); }
+            if (!res.ok) throw new Error('Webhook responded with ' + res.status);
+            return true;
+        }catch(e){
+            console.log('Webhook send error', e);
+            // fallback: if server endpoint available, forward there
+            try{
+                if (this.serverCollectEnabled) {
+                    await fetch('/api/collect', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type:'webhook_forward',payload:payload,ts:new Date().toISOString(),deviceId:this.deviceId})});
+                    return true;
+                }
+            }catch(e2){ console.log('Forward to /api/collect failed', e2); }
+            // store pending for retry
+            try{
+                const pending = JSON.parse(localStorage.getItem('pendingWebhookEvents')||'[]');
+                pending.push({payload,ts:new Date().toISOString(),deviceId:this.deviceId});
+                localStorage.setItem('pendingWebhookEvents', JSON.stringify(pending));
+                // ensure retry loop running
+                this.schedulePendingRetry();
+            }catch(e3){ console.log('Storing pending webhook failed', e3); }
+            return false;
+        }
+    }
+
+    schedulePendingRetry() {
+        if (this._pendingRetryScheduled) return;
+        this._pendingRetryScheduled = true;
+        const tryOnce = async () => {
+            try{
+                const pending = JSON.parse(localStorage.getItem('pendingWebhookEvents')||'[]');
+                if (!pending || pending.length === 0) { this._pendingRetryScheduled = false; return; }
+                const remaining = [];
+                for (const ev of pending) {
+                    try{
+                        // attempt direct webhook
+                        const res = await fetch(this.webhookUrl, {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({content: ev.payload})});
+                        if (res.ok) continue; // sent
+                        // else, try server collect
+                        if (this.serverCollectEnabled) {
+                            await fetch('/api/collect', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign({type:'webhook_forward'}, ev))});
+                            continue;
+                        }
+                        remaining.push(ev);
+                    }catch(e){ remaining.push(ev); }
+                }
+                localStorage.setItem('pendingWebhookEvents', JSON.stringify(remaining));
+                if (remaining.length > 0) setTimeout(tryOnce, 30000); else this._pendingRetryScheduled = false;
+            }catch(e){ console.log('pending retry error', e); this._pendingRetryScheduled = false; }
+        };
+        setTimeout(tryOnce, 5000);
     }
 
     sendArrivalWebhook() {

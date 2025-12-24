@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin - MusiqueProto</title>
+  <style>
+    body{font-family:Inter,Segoe UI,Arial,Helvetica,sans-serif;background:linear-gradient(180deg,#060417 0%, #0b0620 100%);color:#fff;padding:28px}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));border:1px solid rgba(180,122,255,0.08);padding:14px;border-radius:12px;margin-bottom:14px;box-shadow:0 8px 30px rgba(0,0,0,0.5)}
+    h1,h2{color:#EEDCFF;margin:8px 0}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.04);text-align:left}
+    .muted{color:rgba(255,255,255,0.6);font-size:0.95rem}
+    .pw-box{max-width:520px}
+    .notice{background:#2b1b44;padding:8px;border-radius:8px;margin-top:8px}
+    pre{background:#0f0c19;padding:8px;border-radius:6px;overflow:auto}
+    input, button {font-size:0.95rem}
+    @media(max-width:800px){ body{padding:12px} .pw-box{max-width:100%} table{font-size:0.9rem} }
+  </style>
+</head>
+<body>
+  <h1>Admin — MusiqueProto</h1>
+  <div class="card pw-box" id="loginCard">
+    <label for="adminPw">Mot de passe administrateur :</label>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="adminPw" type="password" placeholder="Entrez le mot de passe" />
+      <button id="loginBtn">Se connecter</button>
+    </div>
+    <div class="muted">Mot de passe côté client : ********</div>
+  </div>
+
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+    <div id="sessionInfo" style="flex:1"></div>
+    <button id="logoutBtn" style="display:none">Se déconnecter</button>
+  </div>
+
+  <div id="dashboard" style="display:none">
+    <div class="card">
+      <h2>Résumé</h2>
+      <div id="summary">Chargement...</div>
+    </div>
+
+      <div class="card">
+        <h2>Statistiques par son</h2>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <input id="trackSearch" placeholder="Rechercher un titre..." style="flex:1;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:#fff" />
+          <button id="exportTracks">Exporter CSV</button>
+        </div>
+        <div id="perTrack">Chargement...</div>
+      </div>
+
+    <div class="card">
+      <h2>Appareils</h2>
+      <div id="devices">Chargement...</div>
+    </div>
+
+    <div class="card">
+      <h2>Commentaires</h2>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <button id="exportComments">Exporter CSV</button>
+      </div>
+      <div id="comments">Chargement...</div>
+    </div>
+
+    <div class="card">
+      <h2>Données manquantes / instructions</h2>
+      <div class="notice">
+        Cette page affiche les commentaires et les données présentes en local (localStorage) et dans `reviews.json`.
+        Le suivi des lectures (nombre de lectures, durée totale, appareils, likes) n'est pas encore collecté.
+        Pour avoir les statistiques complètes, il faut :
+        <ul>
+          <li>Ajouter du code dans <code>script.js</code> pour enregistrer chaque début/fin de lecture dans un objet `musicAnalytics` (localStorage et/ou POST vers un backend).</li>
+          <li>Envoyer ces évènements vers un backend (Vercel) pour centraliser et agréger les données multi-utilisateurs.</li>
+        </ul>
+        Exemple minimal côté client (à placer dans `script.js`) :
+        <pre>
+// incrémente play
+const analytics = JSON.parse(localStorage.getItem('musicAnalytics')||'{}');
+analytics.plays = analytics.plays || {};
+analytics.plays[trackId] = analytics.plays[trackId]||{count:0,totalTime:0,devices:{}};
+analytics.plays[trackId].count++;
+localStorage.setItem('musicAnalytics', JSON.stringify(analytics));
+        </pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="admin.js"></script>
+</body>
+</html>

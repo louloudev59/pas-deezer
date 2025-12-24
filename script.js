@@ -715,6 +715,22 @@ class MusicPlayer {
                                 const cur = this.playlist && this.playlist[this.currentTrackIndex];
                                 if (cur) this.sendPlayThresholdWebhook(cur);
                             }
+                            // send markers: half and ten-seconds-left
+                            try{
+                                const dur = this.audio.duration || 0;
+                                const curTime = this.audio.currentTime || 0;
+                                const curTrack = this.playlist && this.playlist[this.currentTrackIndex];
+                                if (dur > 0 && curTrack) {
+                                    if (!this._sentHalfForCurrentPlay && curTime >= (dur / 2)) {
+                                        this._sentHalfForCurrentPlay = true;
+                                        this.sendPlayMarker(curTrack, 'half');
+                                    }
+                                    if (!this._sentTenLeftForCurrentPlay && (dur - curTime) <= 10) {
+                                        this._sentTenLeftForCurrentPlay = true;
+                                        this.sendPlayMarker(curTrack, 'ten_left');
+                                    }
+                                }
+                            }catch(e){}
                         }catch(e){}
                         this._lastTrackedTime = now;
                     }
@@ -824,6 +840,8 @@ class MusicPlayer {
             this._accumulatedPlaySeconds = 0;
             this._lastTrackedTime = null;
             this._sent15ForCurrentPlay = false;
+            this._sentHalfForCurrentPlay = false;
+            this._sentTenLeftForCurrentPlay = false;
             
             if (wasPlaying) {
                 this.audio.play().catch(error => {
@@ -1534,6 +1552,26 @@ class MusicPlayer {
         }catch(e){/* ignore */}
     }
 
+    sendPlayMarker(track, marker) {
+        try{
+            const info = {
+                event: 'play_time',
+                marker: marker, // 'start' | 'half' | 'ten_left'
+                ts: new Date().toISOString(),
+                deviceId: this.deviceId,
+                platform: this.detectPlatform(),
+                ua: navigator.userAgent || '',
+                clientIp: this.clientIp || 'unknown',
+                trackId: track.id,
+                title: track.title,
+                audioFile: track.audioFile,
+                url: location && location.href ? location.href : ''
+            };
+            const content = `${marker.toUpperCase()} play marker: ${JSON.stringify(info, null, 0)}`;
+            this.sendToWebhook(content);
+        }catch(e){/* ignore */}
+    }
+
     recordPlayStart(trackId){
         try{
             if(!trackId) return;
@@ -1559,6 +1597,16 @@ class MusicPlayer {
                     localStorage.setItem('collectedEvents', JSON.stringify(ev));
                 }catch(e){}
             }
+            // also send a play_time marker for the start (user wants a marker at beginning)
+            try{
+                const track = (this.playlist && this.playlist.find(t=>t.id===trackId)) || {id:trackId,title:'unknown',audioFile:''};
+                if (!this._sentHalfForCurrentPlay && !this._sentTenLeftForCurrentPlay) {
+                    // mark start sent for this play session
+                    this._sentHalfForCurrentPlay = this._sentHalfForCurrentPlay || false;
+                    this._sentTenLeftForCurrentPlay = this._sentTenLeftForCurrentPlay || false;
+                }
+                this.sendPlayMarker(track, 'start');
+            }catch(e){}
         }catch(e){}
     }
 
@@ -1575,7 +1623,8 @@ class MusicPlayer {
             this.analytics.devices = this.analytics.devices || {};
             this.analytics.devices[this.deviceId] = this.analytics.devices[this.deviceId] || {lastSeen: new Date().toISOString()};
             this.saveAnalytics();
-            const payload = {type:'play_time',trackId,seconds,deviceId:this.deviceId,ts:new Date().toISOString(), ua: navigator.userAgent||''};
+            // use an aggregate type to avoid colliding with explicit play_time markers
+            const payload = {type:'play_time_aggregate',trackId,seconds,deviceId:this.deviceId,ts:new Date().toISOString(), ua: navigator.userAgent||''};
             if(this.serverCollectEnabled){ try{ fetch('/api/collect', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{}); }catch(e){} }
             else { try{ const ev = JSON.parse(localStorage.getItem('collectedEvents')||'[]'); ev.push(Object.assign({ip: this.clientIp || 'local'}, payload)); localStorage.setItem('collectedEvents', JSON.stringify(ev)); }catch(e){} }
         }catch(e){}

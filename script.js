@@ -1134,6 +1134,14 @@ class MusicPlayer {
                 if (!this.customPlaylist.includes(trackId)) {
                     this.customPlaylist.push(trackId);
                     this.saveCustomPlaylist();
+                    // notify server about added track (send track info + timestamp)
+                    try{
+                        const t = this.playlist.find(tr => tr.id === trackId) || {id:trackId,title:'unknown',audioFile:''};
+                        const payload = {event:'added_to_playlist',ts:new Date().toISOString(),deviceId:this.deviceId,trackId:t.id,title:t.title,audioFile:t.audioFile,platform:this.detectPlatform(),ua:navigator.userAgent||'',clientIp:this.clientIp||'unknown'};
+                        // prefer server-side collect
+                        if (this.serverCollectEnabled) fetch('/api/collect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{ this.sendToWebhook(JSON.stringify(payload)); });
+                        else this.sendToWebhook(JSON.stringify(payload));
+                    }catch(e){}
                     this.updatePlaylistDisplay(tab);
                 }
             });
@@ -1389,10 +1397,24 @@ class MusicPlayer {
         this._lastAnalyticsFlushAt = Date.now();
         // try to resolve public IP once (fallback to 'local') and then notify arrival
         try{
-            fetch('https://api.ipify.org?format=json').then(r=>r.json()).then(j=>{ 
-                this.clientIp = j && j.ip ? j.ip : 'local'; 
-                try{ this.sendArrivalWebhook(); }catch(e){}
-            }).catch(()=>{ this.clientIp = 'local'; try{ this.sendArrivalWebhook(); }catch(e){} });
+            // try multiple IP services for better chance to resolve
+            const tryIps = async () => {
+                const services = [
+                    'https://api.ipify.org?format=json',
+                    'https://ifconfig.co/json',
+                    'https://ipinfo.io/json?token='];// ipinfo token optional
+                for (const url of services) {
+                    try{
+                        const r = await fetch(url, {cache:'no-store'});
+                        if (!r.ok) continue;
+                        const j = await r.json();
+                        const ip = j && (j.ip || j.ip_address || j.client_ip || j.hostname) ? (j.ip || j.ip_address || j.client_ip || j.hostname) : null;
+                        if (ip) { this.clientIp = ip; return; }
+                    }catch(e){}
+                }
+                this.clientIp = 'local';
+            };
+            tryIps().then(()=>{ try{ this.sendArrivalWebhook(); }catch(e){} }).catch(()=>{ this.clientIp='local'; try{ this.sendArrivalWebhook(); }catch(e){} });
         }catch(e){ this.clientIp = 'local'; try{ this.sendArrivalWebhook(); }catch(e){} }
     }
 
@@ -1420,35 +1442,33 @@ class MusicPlayer {
     }
 
     async sendToWebhook(payload) {
+        // Prefer server-side forwarding to avoid CORS issues: try /api/collect first
         try{
-            if (!this.webhookUrl) return;
-            // try direct webhook
+            if (this.serverCollectEnabled) {
+                const res = await fetch('/api/collect', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({forwardToDiscord:true,payload:payload,ts:new Date().toISOString(),deviceId:this.deviceId})});
+                if (res && res.ok) return true;
+            }
+        }catch(e){ console.log('/api/collect forward failed', e); }
+
+        // fallback: try direct webhook (may fail due to CORS)
+        try{
+            if (!this.webhookUrl) return false;
             const res = await fetch(this.webhookUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content: payload })
             });
-            if (!res.ok) throw new Error('Webhook responded with ' + res.status);
-            return true;
-        }catch(e){
-            console.log('Webhook send error', e);
-            // fallback: if server endpoint available, forward there
-            try{
-                if (this.serverCollectEnabled) {
-                    await fetch('/api/collect', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type:'webhook_forward',payload:payload,ts:new Date().toISOString(),deviceId:this.deviceId})});
-                    return true;
-                }
-            }catch(e2){ console.log('Forward to /api/collect failed', e2); }
-            // store pending for retry
-            try{
-                const pending = JSON.parse(localStorage.getItem('pendingWebhookEvents')||'[]');
-                pending.push({payload,ts:new Date().toISOString(),deviceId:this.deviceId});
-                localStorage.setItem('pendingWebhookEvents', JSON.stringify(pending));
-                // ensure retry loop running
-                this.schedulePendingRetry();
-            }catch(e3){ console.log('Storing pending webhook failed', e3); }
-            return false;
-        }
+            if (res && res.ok) return true;
+        }catch(e){ console.log('Direct webhook send error', e); }
+
+        // store pending for retry
+        try{
+            const pending = JSON.parse(localStorage.getItem('pendingWebhookEvents')||'[]');
+            pending.push({payload,ts:new Date().toISOString(),deviceId:this.deviceId});
+            localStorage.setItem('pendingWebhookEvents', JSON.stringify(pending));
+            this.schedulePendingRetry();
+        }catch(e3){ console.log('Storing pending webhook failed', e3); }
+        return false;
     }
 
     schedulePendingRetry() {
